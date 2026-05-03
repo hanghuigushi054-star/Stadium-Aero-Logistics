@@ -1,0 +1,6 @@
+{
+  "name": "Stadium Weather Radar",
+  "description": "プロ野球の各球場の局地気象（気温、湿度、風速、風向）をリアルタイムにシミュレートし、グラウンド上の風向きを視覚的に表示するレーダーダッシュボード。",
+  "requestFramePermissions": [],
+  "majorCapabilities": []
+}
