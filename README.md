@@ -9,12 +9,12 @@
 
 ## 技術スタック (Tech Stack)
 
-*   **Frontend Framework:** React 18
-*   **Language:** TypeScript
-*   **Build Tool:** Vite
-*   **Styling:** Tailwind CSS (サイバーパンク・ダークテーマ)
-*   **Icons:** Lucide React
-*   **Visualization:** SVG & CSS Animations (風向のベクター表現等)
+＊ **フロントエンドフレームワーク:** React 18
+* **言語:**TypeScript
+* **ビルドツール:** 素早く
+* **スタイリング:** Tailwind CSS (サイバーパンク・ダークテーマ)
+* **アイコン:** ルシド・リアクト
+* **視覚化：** SVG & CSS Animations (風向のベクター表現等) + motion/react (Framer Motion による滑らかなUIアニメーション)
 
 ## 使い方 (How to use)
 
