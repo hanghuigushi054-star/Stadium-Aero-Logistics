@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { AlertTriangle, Gauge, RefreshCcw, Activity, Sun, Moon, Target, Wind, Thermometer, Droplets, Compass } from 'lucide-react';
+import { AlertTriangle, Gauge, RefreshCcw, Activity, Sun, Moon, Target, Wind, Thermometer, Droplets, Compass, MapPin } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -9,15 +9,15 @@ function cn(...inputs: ClassValue[]) {
 }
 
 // 太陽の位置（日差し）のシミュレーション
+import { JapanMap } from './JapanMap';
+
 const getSunlightData = () => {
   const date = new Date();
   const hour = date.getHours();
   // 簡単なモデル: 6時〜18時を昼とする
   const isDay = hour >= 6 && hour < 18;
-  // 6時=東(90度), 12時=南(180度), 18時=西(270度)
   const azimuth = isDay ? 90 + ((hour - 6) / 12) * 180 : 0;
   
-  // UI用の方角ラベル
   let directionStr = 'N/A';
   if (isDay) {
     if (azimuth < 135) directionStr = '東(朝日)';
@@ -28,14 +28,11 @@ const getSunlightData = () => {
   return { azimuth, isDay, hour, directionStr };
 };
 
-// 打球への影響アナライザー（風向きと風速から算出）
-// ホームベースを下、センターを上(北:0度)と仮定
 const getGameImpact = (windDir: number, windSpeed: number, isDome?: boolean) => {
-  if (isDome) return { text: '空調管理下。風による打球への影響はありません。', level: 'none' };
+  if (isDome) return { text: '空調管理下。天候による打球への影響はありません。', level: 'none' };
   if (windSpeed < 3.0) return { text: '風は穏やかです。打球への影響は軽微です。', level: 'low' };
 
   let impact = '';
-  // 0度は北（センター方向）、90度は東（ライト方向）、180度は南（バックネット方向）、270度は西（レフト方向）
   if (windDir > 315 || windDir <= 45) {
     impact = '【ホーム風】外野への打球が伸びやすく、ホームランが出やすい状況です。';
   } else if (windDir > 45 && windDir <= 135) {
@@ -55,13 +52,31 @@ const getGameImpact = (windDir: number, windSpeed: number, isDome?: boolean) => 
 };
 
 const STADIUMS = [
-  { id: 'marine', name: 'ZOZOマリンスタジアム', station: '海浜幕張駅', windFactor: 1.2, hasSeaBreeze: true, homeTeam: 'ロッテ', awayTeam: 'オリックス', mock: { temp: 18.5, windSpeed: 9.2, windDirection: 210, pressure: 1011 } },
-  { id: 'koshien', name: '阪神甲子園球場', station: '甲子園駅', windFactor: 0.9, hasSeaBreeze: true, homeTeam: '阪神', awayTeam: '巨人', mock: { temp: 20.1, windSpeed: 5.5, windDirection: 180, pressure: 1013 } },
-  { id: 'jingu', name: '明治神宮野球場', station: '外苑前/信濃町/国立競技場駅', windFactor: 0.7, hasSeaBreeze: false, homeTeam: 'ヤクルト', awayTeam: '中日', mock: { temp: 19.8, windSpeed: 3.2, windDirection: 135, pressure: 1010 } },
-  { id: 'yokohama', name: '横浜スタジアム', station: '関内駅', windFactor: 0.8, hasSeaBreeze: true, homeTeam: 'DeNA', awayTeam: '広島', mock: { temp: 19.0, windSpeed: 4.8, windDirection: 160, pressure: 1014 } },
-  { id: 'escon', name: 'エスコンフィールドHOKKAIDO', station: '北広島駅', windFactor: 0.1, hasSeaBreeze: false, isDome: true, homeTeam: '日本ハム', awayTeam: '西武', mock: { temp: 22.0, windSpeed: 0.5, windDirection: 0, pressure: 1016 } },
-  { id: 'rakuten', name: '楽天モバイルパーク', station: '宮城野原駅', windFactor: 0.8, hasSeaBreeze: false, homeTeam: '楽天', awayTeam: 'ソフトバンク', mock: { temp: 16.5, windSpeed: 6.8, windDirection: 90, pressure: 1009 } }
+  { id: 'escon', name: 'エスコンフィールドHOKKAIDO', mapX: 72, mapY: 16, lat: 42.9904, lng: 141.5516, isDome: true, hasSeaBreeze: false, homeTeam: '日本ハム' },
+  { id: 'rakuten', name: '楽天モバイルパーク', mapX: 66, mapY: 38, lat: 38.2564, lng: 140.9026, isDome: false, hasSeaBreeze: false, homeTeam: '楽天' },
+  { id: 'marine', name: 'ZOZOマリンスタジアム', mapX: 65, mapY: 54, lat: 35.6450, lng: 140.0308, isDome: false, hasSeaBreeze: true, homeTeam: 'ロッテ' },
+  { id: 'jingu', name: '明治神宮野球場', mapX: 63, mapY: 53, lat: 35.6744, lng: 139.7170, isDome: false, hasSeaBreeze: false, homeTeam: 'ヤクルト' },
+  { id: 'yokohama', name: '横浜スタジアム', mapX: 62, mapY: 55, lat: 35.4433, lng: 139.6400, isDome: false, hasSeaBreeze: true, homeTeam: 'DeNA' },
+  { id: 'koshien', name: '阪神甲子園球場', mapX: 43, mapY: 64, lat: 34.7212, lng: 135.3616, isDome: false, hasSeaBreeze: true, homeTeam: '阪神' }
 ];
+
+const fetchWeatherData = async (lat: number, lng: number) => {
+  const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lng}&current=temperature_2m,relative_humidity_2m,surface_pressure,wind_speed_10m,wind_direction_10m&wind_speed_unit=ms`;
+  try {
+    const res = await fetch(url);
+    const data = await res.json();
+    return {
+      temp: data.current.temperature_2m,
+      humidity: data.current.relative_humidity_2m,
+      pressure: data.current.surface_pressure,
+      windSpeed: data.current.wind_speed_10m,
+      windDirection: data.current.wind_direction_10m,
+    };
+  } catch (e) {
+    console.error("Failed to fetch real data", e);
+    return null;
+  }
+};
 
 const RadarScan = ({ isHighWind }: { isHighWind: boolean }) => {
   const colorBase = isHighWind ? '244, 63, 94' : '6, 182, 212';
@@ -82,39 +97,52 @@ const RadarScan = ({ isHighWind }: { isHighWind: boolean }) => {
   );
 };
 
+
+
+
 const App = () => {
   const [selectedStadiumId, setSelectedStadiumId] = useState('marine');
   const stadium = STADIUMS.find(s => s.id === selectedStadiumId) || STADIUMS[0];
 
   const [weather, setWeather] = useState({
-    temp: stadium.mock.temp,
-    windSpeed: stadium.mock.windSpeed,
-    windDirection: stadium.mock.windDirection,
+    temp: 20.0,
+    windSpeed: 0.0,
+    windDirection: 0,
     humidity: 65,
-    pressure: stadium.mock.pressure,
+    pressure: 1013.0,
     sunlight: getSunlightData(),
   });
 
   const [isSyncing, setIsSyncing] = useState(false);
+  const [isLiveData, setIsLiveData] = useState(true);
   const [lastUpdated, setLastUpdated] = useState(new Date());
 
-  // 随時更新用の手動＆自動リフレッシュ処理
+  // 実データの取得と更新処理
   const handleRefresh = async () => {
     if (isSyncing) return;
     setIsSyncing(true);
     
-    // APIフェッチをシミュレート (600ms~1200msの遅延をランダムで設ける)
-    const delay = 600 + Math.random() * 600;
-    await new Promise(resolve => setTimeout(resolve, delay));
+    // APIフェッチ (Open-Meteo)
+    const realData = await fetchWeatherData(stadium.lat, stadium.lng);
 
-    setWeather({
-      temp: parseFloat((stadium.mock.temp + (Math.random() * 2 - 1)).toFixed(1)),
-      windSpeed: Math.max(0, parseFloat((stadium.mock.windSpeed + (Math.random() * 3 - 1.5)).toFixed(1))),
-      windDirection: (stadium.mock.windDirection + (Math.random() * 20 - 10) + 360) % 360,
-      humidity: 60 + Math.floor(Math.random() * 15),
-      pressure: parseFloat((stadium.mock.pressure + (Math.random() * 4 - 2)).toFixed(1)),
-      sunlight: getSunlightData(),
-    });
+    if (realData) {
+      setWeather({
+        ...realData,
+        sunlight: getSunlightData()
+      });
+      setIsLiveData(true);
+    } else {
+      // APIに失敗した場合はフォールバックのモック値
+      setWeather({
+        temp: parseFloat((20.0 + (Math.random() * 5 - 2.5)).toFixed(1)),
+        windSpeed: Math.max(0, parseFloat((5.0 + (Math.random() * 4 - 2)).toFixed(1))),
+        windDirection: (180 + (Math.random() * 40 - 20) + 360) % 360,
+        humidity: 60 + Math.floor(Math.random() * 15),
+        pressure: parseFloat((1013.0 + (Math.random() * 6 - 3)).toFixed(1)),
+        sunlight: getSunlightData(),
+      });
+      setIsLiveData(false);
+    }
     
     setLastUpdated(new Date());
     setIsSyncing(false);
@@ -128,30 +156,29 @@ const App = () => {
 
   // 定期的な風向・風速の揺らぎ（ドーム以外）＆ バックグラウンド更新（30秒毎）
   useEffect(() => {
-    // 短い間隔での細かいビジュアル揺らぎ（データ同期とは別）
+    // 実際の天候は急には変わらないが、レーダーのビジュアルとして細かい揺らぎを表現
     const flutterInterval = setInterval(() => {
       setWeather(prev => {
         if (stadium.isDome || isSyncing) return prev;
         return {
           ...prev,
           windSpeed: Math.max(0, parseFloat((prev.windSpeed + (Math.random() - 0.5) * 1.5).toFixed(1))),
-          windDirection: (prev.windDirection + (Math.random() - 0.5) * 4 + 360) % 360,
-          pressure: parseFloat((prev.pressure + (Math.random() - 0.5) * 0.2).toFixed(1)),
+          windDirection: (prev.windDirection + (Math.random() - 0.5) * 2 + 360) % 360,
         };
       });
     }, 4000);
 
-    // 30秒に1回、自動的に"API"バックグラウンド同期を行う
+    // 1分ごとに最新の天気データを取得
     const syncInterval = setInterval(() => {
       handleRefresh();
-    }, 30000);
+    }, 60000);
 
     return () => {
       clearInterval(flutterInterval);
       clearInterval(syncInterval);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [stadium.id, stadium.isDome, isSyncing]);
+  }, [stadium.id, stadium.isDome, isSyncing, stadium.lat, stadium.lng]);
   
   // 体感温度の簡易計算（風冷却）
   const feelsLikeTemp = parseFloat((weather.temp - Math.max(0, weather.windSpeed * 0.7)).toFixed(1));
@@ -170,10 +197,10 @@ const App = () => {
 
   // 警告ロジック
   const getAlert = () => {
-    if (weather.windSpeed >= 10) {
+    if (weather.windSpeed >= 10 && !stadium.isDome) {
       return { type: 'danger', message: '暴風警報発令中：飛来物に警戒し、避難ルートを確認してください。' };
     }
-    if (weather.windSpeed >= 8) {
+    if (weather.windSpeed >= 8 && !stadium.isDome) {
       return { type: 'warning', message: '強風注意：ビールの空きカップやチケットの飛散等に注意してください。' };
     }
     if (feelsLikeTemp < 10) {
@@ -183,10 +210,9 @@ const App = () => {
   };
   const alert = getAlert();
   
-  const isHighWind = weather.windSpeed >= 8;
+  const isHighWind = weather.windSpeed >= 8 && !stadium.isDome;
   const themeColor = isHighWind ? 'text-rose-500' : 'text-cyan-400';
   const themeBorder = isHighWind ? 'border-rose-500/30' : 'border-cyan-500/30';
-  const themeGlow = isHighWind ? 'shadow-[0_0_20px_rgba(244,63,94,0.3)]' : 'shadow-[0_0_20px_rgba(34,211,238,0.3)]';
 
   const containerVariants = {
     hidden: { opacity: 0 },
@@ -216,41 +242,23 @@ const App = () => {
         animate="show"
       >
         {/* Header / System Info */}
-        <motion.header variants={itemVariants} className="flex-shrink-0 mb-6 flex flex-col md:flex-row md:items-end justify-between gap-6 border-b border-white/5 pb-5">
+        <motion.header variants={itemVariants} className="flex-shrink-0 mb-6 flex flex-col md:flex-row md:items-end justify-between gap-6 pb-2">
           <div className="space-y-4">
             <div className="flex items-center gap-3">
               <Activity className={cn("w-6 h-6", themeColor)} />
-              <h1 className="text-xl md:text-2xl font-bold tracking-tight text-white uppercase">
-                STADIUM WEATHER<span className="text-zinc-500 ml-2 font-medium">RADAR</span>
+              <h1 className="text-xl md:text-2xl font-bold tracking-tight text-white uppercase flex flex-col sm:flex-row sm:items-baseline">
+                STADIUM WEATHER<span className="text-zinc-500 sm:ml-2 font-medium">RADAR SYSTEM</span>
               </h1>
             </div>
-            
-            <div className="flex flex-wrap items-center gap-4">
-              <div className="relative group">
-                <select 
-                  value={selectedStadiumId}
-                  onChange={(e) => setSelectedStadiumId(e.target.value)}
-                  className={cn(
-                    "appearance-none bg-[#0a0a0c]/80 backdrop-blur-md border text-sm font-semibold tracking-wider rounded-lg px-4 py-2.5 pr-10 outline-none focus:ring-2 focus:ring-cyan-500/50 transition-all cursor-pointer text-white",
-                    themeBorder, themeGlow
-                  )}
-                  disabled={isSyncing}
-                >
-                  {STADIUMS.map(s => (
-                    <option key={s.id} value={s.id}>{s.name} ({s.homeTeam})</option>
-                  ))}
-                </select>
-                <div className="absolute right-3 top-1/2 min-h-full items-center pointer-events-none -translate-y-[10px] text-zinc-400">
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m6 9 6 6 6-6"/></svg>
-                </div>
-              </div>
+            <div className="text-sm font-mono text-zinc-400 tracking-widest pl-9">
+               CURRENT: {stadium.name}
             </div>
           </div>
           
           <div className="flex items-center space-x-6 w-full md:w-auto justify-between md:justify-end">
             <div className="text-right flex flex-col">
               <div className="flex items-center gap-2 mb-1 justify-end md:justify-start">
-                <span className="text-[10px] text-zinc-500 font-bold tracking-widest uppercase mt-0.5">Last Updated</span>
+                <span className="text-[10px] text-zinc-500 font-bold tracking-widest uppercase mt-0.5">Live Data</span>
                 <AnimatePresence mode="wait">
                   {isSyncing ? (
                     <motion.span 
@@ -258,9 +266,9 @@ const App = () => {
                       initial={{ opacity: 0 }}
                       animate={{ opacity: 1 }}
                       exit={{ opacity: 0 }}
-                      className="text-[10px] text-cyan-400 font-mono flex items-center gap-1"
+                      className="text-[10px] text-cyan-400 font-mono flex items-center gap-1 px-2 border border-cyan-500/30 rounded"
                     >
-                      <span className="w-1.5 h-1.5 bg-cyan-400 rounded-full animate-ping" /> Syncing...
+                      <span className="w-1.5 h-1.5 bg-cyan-400 rounded-full animate-ping" /> SYNCING
                     </motion.span>
                   ) : (
                     <motion.span 
@@ -268,9 +276,13 @@ const App = () => {
                       initial={{ opacity: 0 }}
                       animate={{ opacity: 1 }}
                       exit={{ opacity: 0 }}
-                      className="text-[10px] text-green-400 font-mono flex items-center gap-1"
+                      className={cn(
+                        "text-[10px] font-mono flex items-center gap-1 px-2 border rounded",
+                        isLiveData ? "text-green-400 border-green-400/30" : "text-amber-400 border-amber-400/30"
+                      )}
                     >
-                      <span className="w-1.5 h-1.5 bg-green-400 rounded-full" /> Live
+                      <span className={cn("w-1.5 h-1.5 rounded-full", isLiveData ? "bg-green-400" : "bg-amber-400")} /> 
+                      {isLiveData ? 'OPEN-METEO API' : 'MOCK FALLBACK'}
                     </motion.span>
                   )}
                 </AnimatePresence>
@@ -331,15 +343,18 @@ const App = () => {
           
           {/* LEFT PANEL: Environment Data (3/12) */}
           <motion.section variants={itemVariants} className="col-span-1 lg:col-span-3 flex flex-col gap-6 order-2 lg:order-1 lg:max-w-sm">
+            
+            <JapanMap selectedId={selectedStadiumId} onSelect={setSelectedStadiumId} />
+            
             <div className="bg-[#0a0a0c]/80 backdrop-blur-md border border-white/5 rounded-2xl p-6 flex-1 shadow-2xl relative overflow-hidden flex flex-col">
               <div className="absolute top-0 left-0 right-0 h-[1px] bg-gradient-to-r from-transparent via-cyan-500/20 to-transparent" />
               
-              <h2 className="text-[11px] font-bold text-zinc-500 mb-6 lg:mb-8 tracking-[0.2em] flex items-center uppercase">
+              <h2 className="text-[11px] font-bold text-zinc-500 mb-6 tracking-[0.2em] flex items-center uppercase">
                 <Thermometer className="mr-2 text-cyan-400 w-3.5 h-3.5" />
-                Environment
+                Base Telemetry
               </h2>
               
-              <div className="flex flex-col gap-6 lg:gap-8 flex-1 justify-between">
+              <div className="flex flex-col gap-6 flex-1 justify-between">
                 <div className="group">
                   <div className="flex justify-between items-end mb-2">
                     <p className="text-[10px] lg:text-xs text-zinc-500 font-medium uppercase tracking-wider">Air Temp</p>
@@ -363,26 +378,6 @@ const App = () => {
                   </div>
                 </div>
 
-                <div className="h-px bg-white/5 w-full" />
-
-                <div className="group">
-                  <div className="flex justify-between items-end mb-2">
-                    <p className="text-[10px] lg:text-xs text-zinc-500 font-medium uppercase tracking-wider">Feels Like</p>
-                  </div>
-                  <div className="flex items-baseline gap-1">
-                    <motion.div 
-                      key={feelsLikeTemp}
-                      initial={{ opacity: 0.5 }}
-                      animate={{ opacity: 1 }}
-                      className={cn("text-3xl lg:text-4xl font-light font-mono tracking-tight glow", 
-                        feelsLikeTemp < 10 ? 'text-blue-400' : feelsLikeTemp > 30 ? 'text-amber-400' : 'text-white')}
-                    >
-                      {feelsLikeTemp.toFixed(1)}
-                    </motion.div>
-                    <span className="text-lg text-zinc-500 font-light">°C</span>
-                  </div>
-                </div>
-                
                 <div className="h-px bg-white/5 w-full" />
                 
                 <div className="grid grid-cols-2 gap-4">
@@ -446,7 +441,7 @@ const App = () => {
               </h2>
               <div className="mt-2 flex items-center gap-2 bg-slate-900/60 pl-2 pr-3 py-1 rounded-full backdrop-blur-sm border border-white/5 w-fit">
                 <span className={cn("w-2 h-2 rounded-full", isHighWind ? "bg-rose-500 animate-pulse" : "bg-cyan-500 shadow-[0_0_8px_rgba(6,182,212,0.8)]")} />
-                <span className="text-[10px] font-mono text-zinc-300">TRACKING: {stadium.id.toUpperCase()}</span>
+                <span className="text-[10px] font-mono text-zinc-300">TARGET: <span className="text-cyan-300 font-bold">{stadium.id.toUpperCase()}</span></span>
               </div>
             </div>
             
@@ -494,24 +489,26 @@ const App = () => {
                 </svg>
 
                 {/* Animated Wind Vector Arrow */}
-                <motion.div 
-                  className="absolute inset-0 flex items-center justify-center pointer-events-none z-30" 
-                  animate={{ rotate: weather.windDirection }}
-                  transition={{ type: "spring", stiffness: 50, damping: 20 }}
-                >
-                  <div className="flex flex-col items-center">
-                    <div className={cn(
-                      "w-[3px] h-28 lg:h-36 rounded-full drop-shadow-xl",
-                      isHighWind 
-                        ? "bg-gradient-to-t from-rose-500 to-transparent shadow-[0_0_25px_rgba(244,63,94,0.9)]" 
-                        : "bg-gradient-to-t from-cyan-400 to-transparent shadow-[0_0_25px_rgba(34,211,238,0.9)]"
-                    )} />
-                    <div className={cn(
-                      "w-0 h-0 border-l-[8px] lg:border-l-[10px] border-l-transparent border-r-[8px] lg:border-r-[10px] border-r-transparent border-t-[16px] lg:border-t-[20px] -mt-1 drop-shadow-[0_4px_4px_rgba(0,0,0,0.5)]",
-                      isHighWind ? "border-t-rose-500" : "border-t-cyan-400"
-                    )} />
-                  </div>
-                </motion.div>
+                {!stadium.isDome && (
+                  <motion.div 
+                    className="absolute inset-0 flex items-center justify-center pointer-events-none z-30" 
+                    animate={{ rotate: weather.windDirection }}
+                    transition={{ type: "spring", stiffness: 50, damping: 20 }}
+                  >
+                    <div className="flex flex-col items-center">
+                      <div className={cn(
+                        "w-[3px] h-28 lg:h-36 rounded-full drop-shadow-xl",
+                        isHighWind 
+                          ? "bg-gradient-to-t from-rose-500 to-transparent shadow-[0_0_25px_rgba(244,63,94,0.9)]" 
+                          : "bg-gradient-to-t from-cyan-400 to-transparent shadow-[0_0_25px_rgba(34,211,238,0.9)]"
+                      )} />
+                      <div className={cn(
+                        "w-0 h-0 border-l-[8px] lg:border-l-[10px] border-l-transparent border-r-[8px] lg:border-r-[10px] border-r-transparent border-t-[16px] lg:border-t-[20px] -mt-1 drop-shadow-[0_4px_4px_rgba(0,0,0,0.5)]",
+                        isHighWind ? "border-t-rose-500" : "border-t-cyan-400"
+                      )} />
+                    </div>
+                  </motion.div>
+                )}
                 
                 {/* Center Reticle */}
                 <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-40">
@@ -536,11 +533,12 @@ const App = () => {
                 {/* Wind Speed & Direction */}
                 <div className="group relative">
                   <div className="flex justify-between items-end mb-2">
-                    <p className="text-[10px] lg:text-xs text-zinc-500 font-medium uppercase tracking-wider">Wind Speed</p>
+                    <p className="text-[10px] lg:text-xs text-zinc-500 font-medium uppercase tracking-wider">Wind Velocity</p>
                     <div className={cn("text-[10px] font-mono uppercase px-2 py-0.5 rounded border transition-colors", 
+                      stadium.isDome ? 'text-zinc-500 border-zinc-500/30 bg-zinc-500/10' :
                       isHighWind ? 'text-rose-400 border-rose-400/30 bg-rose-400/10' : 
                       'text-green-400 border-green-400/30 bg-green-400/10')}>
-                      {isHighWind ? 'HIGH WIND' : 'STABLE'}
+                      {stadium.isDome ? 'INDOOR' : isHighWind ? 'HIGH WIND' : 'STABLE'}
                     </div>
                   </div>
                   <div className="flex items-baseline gap-1">
@@ -549,38 +547,42 @@ const App = () => {
                       initial={{ opacity: 0.5 }}
                       animate={{ opacity: 1 }}
                       className={cn("text-4xl lg:text-5xl font-light font-mono tracking-tight glow transition-colors", 
-                        isHighWind ? 'text-rose-400' : 'text-white'
+                        stadium.isDome ? 'text-zinc-600' : isHighWind ? 'text-rose-400' : 'text-white'
                       )}
                     >
-                      {weather.windSpeed.toFixed(1)}
+                      {stadium.isDome ? "0.0" : weather.windSpeed.toFixed(1)}
                     </motion.div>
                     <span className="text-xl text-zinc-500 font-light">m/s</span>
                   </div>
                   
                   {/* Subtle speed meter bar */}
-                  <div className="absolute -bottom-3 left-0 w-full h-1 bg-white/5 rounded-full overflow-hidden">
-                    <motion.div 
-                      className={cn("h-full", isHighWind ? "bg-rose-500" : "bg-cyan-500")}
-                      animate={{ width: `${Math.min(100, (weather.windSpeed / 15) * 100)}%` }}
-                      transition={{ type: "spring", stiffness: 100 }}
-                    />
-                  </div>
+                  {!stadium.isDome && (
+                    <div className="absolute -bottom-3 left-0 w-full h-1 bg-white/5 rounded-full overflow-hidden">
+                      <motion.div 
+                        className={cn("h-full", isHighWind ? "bg-rose-500" : "bg-cyan-500")}
+                        animate={{ width: `${Math.min(100, (weather.windSpeed / 15) * 100)}%` }}
+                        transition={{ type: "spring", stiffness: 100 }}
+                      />
+                    </div>
+                  )}
                 </div>
 
                 <div className="group mt-2">
                   <div className="flex justify-between items-end mb-1">
-                    <p className="text-[10px] lg:text-xs text-zinc-500 font-medium uppercase tracking-wider">Vector / Angle</p>
+                    <p className="text-[10px] lg:text-xs text-zinc-500 font-medium uppercase tracking-wider">Vector Angle</p>
                   </div>
                   <div className="flex items-center gap-3">
-                    <Compass className={cn("w-6 h-6", themeColor)} />
+                    <Compass className={cn("w-6 h-6", stadium.isDome ? 'text-zinc-600' : themeColor)} />
                     <div className="flex flex-col">
                       <motion.p 
                         key={weather.windDirection}
-                        className={cn("text-xl font-bold leading-tight", themeColor)}
+                        className={cn("text-xl font-bold leading-tight", stadium.isDome ? 'text-zinc-500' : themeColor)}
                       >
-                        {getWindDirectionJP(weather.windDirection)}
+                        {stadium.isDome ? "無風" : getWindDirectionJP(weather.windDirection)}
                       </motion.p>
-                      <p className="text-xs font-mono text-zinc-500">{weather.windDirection.toFixed(0)}° DEG</p>
+                      <p className="text-xs font-mono text-zinc-500">
+                        {stadium.isDome ? "N/A" : `${weather.windDirection.toFixed(0)}° DEG`}
+                      </p>
                     </div>
                   </div>
                 </div>
@@ -638,7 +640,8 @@ const App = () => {
             <div className="bg-[#0a0a0c]/80 backdrop-blur-md border border-white/5 rounded-2xl p-5 shadow-xl relative overflow-hidden">
               <div className={cn("absolute top-0 left-0 w-1 h-full", 
                 gameImpact.level === 'high' ? 'bg-rose-500' : 
-                gameImpact.level === 'medium' ? 'bg-amber-400' : 'bg-cyan-500')} 
+                gameImpact.level === 'medium' ? 'bg-amber-400' : 
+                stadium.isDome ? 'bg-zinc-600' : 'bg-cyan-500')} 
               />
               <div className="absolute top-0 left-0 right-0 h-[1px] bg-gradient-to-r from-transparent via-white/10 to-transparent" />
               <h3 className="text-[10px] text-zinc-400 mb-3 tracking-[0.2em] uppercase flex items-center gap-2">
@@ -651,8 +654,8 @@ const App = () => {
                   {gameImpact.text}
                 </p>
                 <p className="text-[10px] leading-relaxed text-zinc-500 pt-2 border-t border-white/5">
-                  [ログ] {stadium.hasSeaBreeze ? '海岸沿い特有の海風が絶えず変化中。' : stadium.isDome ? 'ドーム環境のため無風状態として処理中。' : 'ビル風・市街地の気流の乱れが発生中。'}
-                  {weather.pressure < 1005 && !stadium.isDome ? ' ※現在低気圧下のため、球が伸びやすい傾向にあります。' : ''}
+                  [GPS] 緯度:{stadium.lat} 経度:{stadium.lng} <br/>
+                  [ログ] {stadium.isDome ? 'ドーム環境のため無風状態として処理中。' : stadium.hasSeaBreeze ? '付近の海岸からの局地的な風の変化を監視中。' : '市街地特有の気流の乱れを観測中。'}
                 </p>
               </div>
             </div>
@@ -669,12 +672,12 @@ const App = () => {
         className="relative z-10 flex-shrink-0 mt-8 pt-4 border-t border-white/5 flex flex-col md:flex-row items-center justify-between max-w-[1400px] w-full mx-auto"
       >
         <div className="text-[10px] text-zinc-600 font-mono flex items-center gap-3">
-          <span className="flex items-center gap-1.5"><Gauge className="w-3 h-3 text-cyan-800"/> Node: Primary Array</span>
+          <span className="flex items-center gap-1.5"><MapPin className="w-3 h-3 text-cyan-800"/> {isLiveData ? 'OPEN-METEO ONLINE' : 'LOCAL SIMULATION_MODE'}</span>
           <span className="hidden sm:block">|</span>
-          <span className="hidden sm:block">Status: SECURE</span>
+          <span className="hidden sm:block">Node: Primary Array</span>
         </div>
         <div className="text-[10px] text-zinc-600 font-mono mt-2 md:mt-0">
-          DATA SOURCED: DEMO ENVIRONMENT
+          POWERED BY OPEN-METEO // VECTOR_RADAR V3
         </div>
       </motion.footer>
     </div>
